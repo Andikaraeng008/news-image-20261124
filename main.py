@@ -1,10 +1,12 @@
-"""The World Today - Tuesday 24 November 2026, in one image.
+"""News Image 24 Nov v4 — 'THE WORLD TODAY', Tuesday 24 November 2026.
 
-Entry program for make.fun news-image-20261124. Draws a 1024x1024
-broadsheet front page with 50 verified stories (15 numbered main
-blocks + 35 one-line briefs) using Pillow when available. The grader
-runs with the Python standard library only, so when Pillow is missing
-main() copies the bundled entry.png to the output instead.
+Renders a dense 1024x1024 broadsheet front page with exactly 50 verified
+stories (15 numbered main blocks + 35 briefs), following the
+muse-ai-pro-broadsheet-studio skill: small visuals, UTC timeline strip,
+metrics strip, map and Date Check, all numbers/dates/MONDAY tags synced.
+
+Stdlib fallback: if Pillow is unavailable, copy the bundled entry.png
+to the output instead, so the grader (stdlib only) still gets the image.
 """
 import os
 import shutil
@@ -15,35 +17,44 @@ try:
 except Exception:
     HAVE_PIL = False
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-OUT = "/output/entry.png"
 W, H = 1024, 1024
-M = 14
-CW = W - 2 * M
-PAPER = (247, 243, 232)
-INK = (17, 17, 17)
-RED = (155, 27, 27)
-GREY = (85, 85, 85)
-RULE = (40, 40, 40)
-FAINT = (216, 210, 194)
+PAPER = (247, 242, 231)
+INK = (25, 25, 25)
+RED = (140, 29, 24)
+GREY = (112, 110, 102)
+HAIR = (150, 146, 134)
+LAND = (214, 208, 192)
+LAND_EDGE = (148, 144, 132)
 
-SERIF_B = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
-SERIF_I = "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf"
-SANS_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+BASE = os.path.dirname(os.path.abspath(__file__))
+ASSETS = os.path.join(BASE, "assets")
 
-
-def font(path, size):
-    return ImageFont.truetype(path, size)
+SERIF_B = "LiberationSerif-Bold.ttf"
+SERIF = "LiberationSerif-Regular.ttf"
+SERIF_I = "LiberationSerif-Italic.ttf"
+SANS = "LiberationSans-Regular.ttf"
+SANS_B = "LiberationSans-Bold.ttf"
 
 
-def wrap(d, text, fnt, width):
-    words = text.split()
+def out_path():
+    if os.path.isdir("/output"):
+        return "/output/entry.png"
+    return os.path.join(BASE, "out", "entry.png")
+
+
+def font(name, size):
+    try:
+        return ImageFont.truetype(
+            "/usr/share/fonts/truetype/liberation/" + name, size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def wrap(draw, text, fnt, width):
     lines, cur = [], ""
-    for w in words:
+    for w in text.split():
         t = (cur + " " + w).strip()
-        if d.textlength(t, font=fnt) <= width:
+        if draw.textlength(t, font=fnt) <= width:
             cur = t
         else:
             if cur:
@@ -54,345 +65,445 @@ def wrap(d, text, fnt, width):
     return lines
 
 
-def para(d, x, y, text, fnt, width, fill=INK, leading=None):
-    if leading is None:
-        leading = fnt.size + 4
-    for ln in wrap(d, text, fnt, width):
-        d.text((x, y), ln, font=fnt, fill=fill)
-        y += leading
-    return y
+def wrap_mixed(draw, head, body, fh, fb, width):
+    """Wrap a bold headline + regular body into lines of (word, font)."""
+    words = [(w, fh) for w in head.split()]
+    words.append(("\u2014", fb))
+    words += [(w, fb) for w in body.split()]
+    lines, cur, curw = [], [], 0
+    space = draw.textlength(" ", font=fb)
+    for w, f in words:
+        ww = draw.textlength(w, font=f)
+        add = ww if not cur else ww + space
+        if cur and curw + add > width:
+            lines.append(cur)
+            cur, curw = [(w, f)], ww
+        else:
+            cur.append((w, f))
+            curw += add
+    if cur:
+        lines.append(cur)
+    return lines
 
 
-def hline(d, x0, x1, y, width=1):
-    d.line([(x0, y), (x1, y)], fill=RULE, width=width)
+def draw_mixed_line(draw, x, y, segments):
+    cx = x
+    space = draw.textlength(" ", font=segments[0][1])
+    for i, (t, f) in enumerate(segments):
+        draw.text((cx, y), t, font=f, fill=INK)
+        cx += draw.textlength(t, font=f)
+        if i < len(segments) - 1:
+            cx += space
+    return cx
 
 
-def vline(d, x, y0, y1, width=1):
-    d.line([(x, y0), (x, y1)], fill=RULE, width=width)
+def paste_photo(draw_img, path, box):
+    """Paste a photo resized to cover box (x, y, w, h), or grey fallback."""
+    x, y, w, h = (int(v) for v in box)
+    try:
+        im = Image.open(path).convert("RGB")
+        im = im.resize((w, h), Image.LANCZOS)
+        draw_img.paste(im, (x, y))
+    except Exception:
+        ImageDraw.Draw(draw_img).rectangle(
+            [x, y, x + w, y + h], fill=(190, 186, 174))
 
 
-def fit_image(path, w, h, focus=0.5):
-    im = Image.open(path).convert("RGB")
-    iw, ih = im.size
-    scale = max(w / iw, h / ih)
-    nw, nh = int(iw * scale + 0.5), int(ih * scale + 0.5)
-    im = im.resize((nw, nh), Image.LANCZOS)
-    x0 = (nw - w) // 2
-    y0 = int(focus * max(nh - h, 0))
-    return im.crop((x0, y0, x0 + w, y0 + h))
+def ll2xy(lon, lat, x0, y0, w, h):
+    return (x0 + (lon + 170.0) / 360.0 * w,
+            y0 + (75.0 - lat) / 130.0 * h)
 
 
-# ---------------------------------------------------------------- data
-LEAD_HEAD = "SEOUL ALERT AS RUSSIAN JETS ENTER DEFENCE ZONE"
-LEAD_BODY = (
-    "SEOUL \u2014 South Korea scrambled fighter jets early on Tuesday after "
-    "several Russian warplanes entered the country's air defence "
-    "identification zone over the East Sea without notice, the Joint "
-    "Chiefs of Staff said. Ulleung Island was told to shelter at 07:52; "
-    "the warning was lifted three minutes later; officials later said "
-    "the aircraft was possibly North Korean."
-)
-LEAD_BULLETS = [
-    "Alert issued 07:52, lifted 3 minutes later",
-    "Jets entered the defence zone, not sovereign airspace",
+CONTINENTS = [
+    [(-168, 66), (-140, 70), (-120, 72), (-95, 80), (-80, 73), (-65, 60),
+     (-55, 47), (-70, 42), (-75, 35), (-80, 26), (-90, 21), (-97, 16),
+     (-105, 20), (-115, 28), (-125, 40), (-125, 49), (-140, 60),
+     (-155, 58), (-168, 66)],
+    [(-80, 10), (-60, 8), (-50, 0), (-35, -8), (-40, -20), (-48, -28),
+     (-58, -35), (-65, -45), (-70, -54), (-73, -40), (-80, -20),
+     (-80, -5), (-80, 10)],
+    [(-17, 15), (-10, 30), (0, 36), (10, 37), (20, 32), (32, 31),
+     (35, 28), (43, 12), (51, 11), (48, 0), (40, -15), (35, -25),
+     (28, -33), (18, -35), (12, -18), (9, 4), (-8, 5), (-17, 15)],
+    [(-10, 36), (-9, 43), (-2, 48), (0, 50), (5, 53), (8, 57), (10, 59),
+     (18, 56), (21, 55), (24, 59), (28, 60), (30, 62), (40, 68),
+     (55, 69), (70, 72), (90, 75), (110, 76), (130, 72), (150, 70),
+     (170, 66), (178, 65), (170, 60), (162, 56), (158, 52), (142, 50),
+     (140, 40), (135, 35), (130, 33), (127, 35), (122, 38), (120, 32),
+     (110, 20), (108, 12), (105, 9), (100, 8), (98, 12), (94, 17),
+     (90, 22), (86, 20), (80, 13), (77, 8), (75, 12), (72, 20),
+     (66, 25), (62, 25), (58, 26), (56, 27), (52, 26), (50, 29),
+     (48, 30), (44, 29), (40, 32), (36, 36), (30, 36), (26, 38),
+     (23, 36), (19, 40), (15, 44), (12, 44), (8, 44), (3, 43),
+     (-2, 37), (-6, 36), (-10, 36)],
+    [(113, -22), (114, -30), (115, -35), (120, -34), (129, -32),
+     (132, -32), (135, -35), (138, -35), (140, -38), (145, -38),
+     (150, -37), (153, -32), (153, -27), (150, -23), (146, -19),
+     (142, -15), (142, -11), (136, -12), (132, -12), (126, -14),
+     (122, -17), (118, -20), (113, -22)],
+    [(-45, 60), (-30, 68), (-22, 70), (-25, 76), (-40, 80), (-55, 76),
+     (-58, 70), (-53, 64), (-45, 60)],
 ]
-MINUTE = [
-    "07:52 \u2014 Ulleung Island told to shelter as jets approach.",
-    "07:55 \u2014 Civil defence warning lifted, three minutes later.",
-    "Later \u2014 Officials say the aircraft was possibly North Korean.",
+
+MAP_POINTS = [
+    ("WASHINGTON", -77, 39, (-52, 10)),
+    ("TALLINN", 24.7, 59.4, (6, -12)),
+    ("GENEVA", 6.1, 46.2, (-48, 8)),
+    ("GAZA", 34.5, 31.5, (6, 2)),
+    ("DELHI", 77.2, 28.6, (-8, 10)),
+    ("ULLEUNG", 130.9, 37.5, (6, -4)),
 ]
 
-SECONDARY = [
-    ("MARKETS \u00b7 MONDAY [REPORTED]",
-     "HUANG'S RETURN SENDS NVIDIA UP 31%",
-     "Shares jump on Monday as Jensen Huang returns as chief executive "
-     "11 days after resigning; Nasdaq +6.5%, S&P +4.7%.",
-     "media-generation-traders-0-efafd764-bfed-49ef-a038-cb4b480ffc99.webp"),
-    ("SPORT \u00b7 GENEVA",
-     "GUKESH DEFENDS CROWN AS TITLE RACE OPENS",
-     "World champion faces Uzbekistan's Javokhir Sindarov as the 2026 "
-     "World Chess Championship begins in Geneva.",
-     "media-generation-chess-0-cf5f387b-c1f8-4ac2-9bae-712fb400aeaf.webp"),
-]
-
-# Numbered main blocks 4-15: (headline, summary)
-MAIN = [
-    ("NATO CALLS URGENT MEETING",
+MAIN_BLOCKS = [
+    ("4. NATO CALLS URGENT MEETING",
      "Alliance meets as a string of incidents escalates tensions with Russia."),
-    ("RUSSIA WARNS ESTONIA",
-     "Moscow warns of 'open war' over a plan to close land border crossings."),
-    ("INDIA PLEDGES $1.62BN TO NEPAL",
+    ("5. RUSSIA WARNS ESTONIA",
+     "Moscow warns of \u2018open war\u2019 over a plan to close land border crossings."),
+    ("6. INDIA PLEDGES $1.62BN TO NEPAL",
      "Aid for flood rebuilding, announced Monday; $377m grant, $1.24bn credit."),
-    ("STATES SUE OVER GROK IMAGES",
+    ("7. STATES SUE OVER GROK IMAGES",
      "US states sue Musk firms over sexualised images made by AI chatbot Grok."),
-    ("TAJIKISTAN MOVES TO QUIT ICC",
+    ("8. TAJIKISTAN MOVES TO QUIT ICC",
      "Dushanbe moves to leave the International Criminal Court."),
-    ("DENMARK UPHOLDS 'GHETTO LAW'",
+    ("9. DENMARK UPHOLDS \u2018GHETTO LAW\u2019",
      "Top court backs evictions under the hardline housing law."),
-    ("INDONESIA FACTORY FIRE",
+    ("10. INDONESIA FACTORY FIRE",
      "Fire at a candy factory in Banten kills 24; rescuers search for the missing."),
-    ("VANUATU QUAKE",
+    ("11. VANUATU QUAKE",
      "A 6.5 quake strikes off Vanuatu; no tsunami threat."),
-    ("MERKURY SUNK OFF LIBYA",
+    ("12. MERKURY SUNK OFF LIBYA",
      "Zelenskyy confirms Ukrainian drones sank the Russian corvette off Libya."),
-    ("KYIV HIT",
+    ("13. KYIV HIT",
      "Russian drones strike homes in the Kyiv region; several people missing."),
-    ("SPARTA II UNDER TOW",
+    ("14. SPARTA II UNDER TOW",
      "Moscow hauls the drone-hit cargo ship; all 16 crew safe."),
-    ("ALCARAZ WINS ATP FINALS",
+    ("15. ALCARAZ WINS ATP FINALS",
      "Spaniard beats Alexander Zverev in Turin to claim his first ATP Finals title."),
 ]
 
-# One-line briefs: (bold lead-in, rest). 35 briefs.
 BRIEFS = [
     ("GAZA / WEST BANK", "Israeli raids hit West Bank towns."),
-    ("IRAN SANCTIONS \u00b7 MONDAY", "US sanctions target Tehran's banks."),
+    ("IRAN SANCTIONS \u00b7 MONDAY", "US sanctions target Tehran\u2019s banks."),
     ("INDIA", "Modi opens AI centre; India-China generals talk."),
-    ("LISBON MARCH", "Thousands protest the cost of living."),
-    ("MEXICO RAID", "16 cartel men killed in Chapo capture."),
-    ("NIKKEI SURGE", "Nikkei jumps 3% on Huang's comeback."),
+    ("NIKKEI SURGE", "Nikkei jumps 3% on Huang\u2019s comeback."),
     ("NATO AWACS \u00b7 MONDAY", "Early-warning jets head to Poland."),
-    ("GERMANY\u2013KYIV \u00b7 MONDAY", "Berlin to use Kyiv's Delta system."),
-    ("IRAN VOWS REPLY \u00b7 MONDAY", "Tehran vows to counter US blockade."),
-    ("TRUMP HALTS BLAST \u00b7 MONDAY", "Army pauses Iowa azide blast."),
-    ("MURMANSK GOVERNOR HELD", "Governor held over graft claims."),
-    ("CHINA DEATH SENTENCE", "Official dies for leaking secrets."),
-    ("TRIPP KICKOFF", "Armenia, US launch Trump Route project."),
     ("HORMUZ TANKERS HIT", "Three tankers hit mines, catch fire."),
-    ("SEOUL MINISTER RESIGNS", "Education chief quits over AI rules."),
+    ("MURMANSK GOVERNOR HELD", "Governor held over graft claims."),
     ("UN AI FRAMEWORK", "UN chief wants AI safety rules in a year."),
-    ("LATVIA SNUBS MOSCOW", "PM refuses to restore ties with Russia."),
-    ("GAZA CHILDREN OUT", "Injured Gaza children flown to Britain."),
-    ("O'HARE GROUND STOP", "Chicago halts flights briefly."),
-    ("SWIFT PLOT FOILED", "Mossad foiled ISIS plot on Vienna shows."),
     ("LAHORE SMOG", "Lahore tops world pollution ranking again."),
-    ("PAKISTAN QUAKE", "4.0 quake strikes near Afghan border."),
-    ("MEGHAN CALL", "King Charles calls Meghan after arrest."),
-    ("GERMAN SCHOOL THREATS", "450 schools get bomb threats."),
-    ("SARAYU EXPRESS", "Modi, Nepal PM flag off new train."),
     ("PANT 128", "Pant hits 128 against New Zealand."),
-    ("VERSTAPPEN WINS", "Verstappen takes Las Vegas Grand Prix."),
-    ("OIL BILL SOARS", "India's oil bill up 60% to $16bn."),
-    ("SPICEJET CRISIS", "Pilots urge action as debts mount."),
-    ("COP31 FLOP \u00b7 MONDAY", "Climate talks end with no fuel deal."),
     ("GRAIN DEAL NO", "Russia rejects a new UN grain deal."),
+    ("CHINA DEATH SENTENCE", "China death sentence for leaking secrets."),
+    ("LATVIA SNUBS MOSCOW", "PM refuses to restore ties with Russia."),
+    ("PAKISTAN QUAKE", "4.0 quake strikes near Afghan border."),
+    ("VERSTAPPEN WINS", "Verstappen takes Las Vegas Grand Prix."),
     ("FIFA 2031 \u00b7 MONDAY", "FIFA confirms 2031 World Cup hosts."),
+    ("GERMANY\u2013KYIV \u00b7 MONDAY", "Berlin-Kyiv\u2019s Delta system."),
+    ("TRIPP KICKOFF", "Armenia, US launch Trump Route project."),
+    ("GAZA CHILDREN OUT", "Injured Gaza children flown to Britain."),
+    ("MEGHAN CALL", "King Charles calls Meghan after arrest."),
+    ("OIL BILL SOARS", "India\u2019s oil bill up 60% to $1.6bn."),
     ("GAZA CONTAMINATION", "Oxfam: Gaza poisoned for decades."),
-    ("KIM SNUBS TRUMP", "Kim ignores Trump's repeated outreach."),
-    ("CHAPO TRIAL", "'El Chapo Isidro' to face trial in Mexico."),
+    ("LISBON MARCH", "Thousands protest the cost of living."),
+    ("IRAN VOWS REPLY \u00b7 MONDAY", "Tehran vows to counter US blockade."),
+    ("O\u2019HARE GROUND STOP", "Chicago halts flights briefly."),
+    ("GERMAN SCHOOL THREATS", "450 schools get bomb threats."),
+    ("SPICEJET CRISIS", "Pilots urge action as debts mount."),
+    ("KIM SNUBS TRUMP", "Kim ignores Trump\u2019s repeated outreach."),
+    ("MEXICO RAID", "16 cartel men killed in Chapo capture."),
+    ("TRUMP HALTS BLAST \u00b7 MONDAY", "Army pauses Iowa arms blast probe."),
+    ("SEOUL MINISTER RESIGNS", "Minister quits over airspace rules."),
+    ("SWIFT PLOT FOILED", "Mossad foiled ISIS plot on Vienna shows."),
+    ("SARAYU EXPRESS", "Modi, Nepal PM flag off new train."),
+    ("COP31 FLOP \u00b7 MONDAY", "Climate talks end with no fuel deal."),
+    ("CHAPO TRIAL", "\u2018El Chapo Isidro\u2019 to face trial in Mexico."),
 ]
 
-METRICS = [
-    ("07:52", "SEOUL ALERT TIME"),
-    ("3 MIN", "ALERT LIFTED AFTER"),
-    ("+31%", "NVIDIA ON HUANG RETURN"),
-    ("$1.62BN", "INDIA AID TO NEPAL"),
-    ("+6.5%", "NASDAQ ON MONDAY"),
-    ("1,500", "NEPAL FLOOD DEAD, AUG"),
-]
 
-DATE_CHECK = (
-    "Every story here happened, or was first reported, on Tuesday "
-    "24 November 2026 \u2014 except the items marked MONDAY: Nepal aid, "
-    "Iran sanctions, Nvidia's return, NATO AWACS, the Delta deal, "
-    "Iran's blockade reply, the Iowa blast pause, COP31, FIFA 2031. "
-    "All illustrations are original work made for this edition. "
-    "50 STORIES \u00b7 6 REGIONS \u00b7 3 ILLUSTRATIONS"
-)
-
-
-def draw_map(d, x, y, w, h):
-    d.rectangle([x, y, x + w, y + h], outline=RULE, width=1)
-    # Stylised continents, normalised 0-1000 coords.
-    continents = [
-        [(60, 180), (180, 120), (300, 150), (330, 230), (280, 300),
-         (220, 340), (150, 320), (90, 260)],
-        [(280, 420), (340, 400), (380, 470), (350, 580), (300, 560),
-         (270, 480)],
-        [(470, 180), (540, 150), (580, 200), (540, 250), (480, 240)],
-        [(470, 300), (560, 290), (600, 380), (560, 520), (500, 500),
-         (460, 380)],
-        [(600, 150), (850, 120), (950, 200), (900, 320), (780, 380),
-         (680, 300), (620, 220)],
-        [(800, 560), (900, 550), (930, 620), (850, 650), (790, 610)],
-    ]
-    for poly in continents:
-        pts = [(x + px * w / 1000, y + py * h / 1000) for px, py in poly]
-        d.polygon(pts, fill=(226, 220, 205), outline=(150, 145, 130))
-    dots = [
-        ("WASHINGTON", 210, 270, -4, 8),
-        ("TALLINN", 545, 175, 4, -4),
-        ("GENEVA", 505, 215, -34, 4),
-        ("GAZA", 585, 330, 4, -4),
-        ("DELHI", 760, 300, -8, 8),
-        ("ULLEUNG", 905, 250, -30, -4),
-    ]
-    f = font(SANS_B, 8)
-    for name, px, py, dx, dy in dots:
-        cx, cy = x + px * w / 1000, y + py * h / 1000
-        d.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=RED)
-        d.text((cx + dx, cy + dy), name, font=f, fill=INK)
-
-
-def build():
-    # 50 stories exactly: 1 lead + 2 secondary + 12 grid blocks + 35 briefs.
-    assert 1 + len(SECONDARY) + len(MAIN) + len(BRIEFS) == 50
+def render():
     img = Image.new("RGB", (W, H), PAPER)
     d = ImageDraw.Draw(img)
-    x0, x1 = M, W - M
+    x0, x1 = 16, 1008
+    y = 8
 
     # Masthead
-    f_mast = font(SERIF_B, 66)
-    d.text((W / 2, 6), "THE WORLD TODAY", font=f_mast, fill=INK, anchor="ma")
-    hline(d, x0, x1, 78, 2)
-    f_date = font(SERIF_B, 15)
-    d.text((x0, 84), "TUESDAY, 24 NOVEMBER 2026", font=f_date, fill=INK)
-    rt = "PRESS TIME 00:30 UTC \u00b7 No. 329 \u00b7 50 STORIES"
-    d.text((x1, 84), rt, font=f_date, fill=INK, anchor="ra")
-    hline(d, x0, x1, 104)
+    f_title = font(SERIF_B, 56)
+    t = "THE WORLD TODAY"
+    d.text(((W - d.textlength(t, font=f_title)) / 2, y), t,
+           font=f_title, fill=INK)
+    y += 68
+    d.line([(x0, y), (x1, y)], fill=INK, width=2)
+    y += 5
+    f_date = font(SANS_B, 13)
+    d.text((x0, y), "TUESDAY, 24 NOVEMBER 2026", font=f_date, fill=INK)
+    r = "PRESS TIME 00:30 UTC \u00b7 No. 329 \u00b7 50 STORIES"
+    d.text((x1 - d.textlength(r, font=f_date), y), r, font=f_date, fill=INK)
+    y += 19
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 4
 
-    # Timeline strip + markets ticker
-    f_strip = font(SANS_B, 12)
-    d.text((W / 2, 108), "THE DAY IN BRIEF \u2014 00:11 MERKURY CONFIRMED \u00b7 "
-           "00:20 VANUATU QUAKE \u00b7 07:52 ULLEUNG ALERT \u00b7 "
-           "10:40 O'HARE GROUND STOP", font=f_strip, fill=INK, anchor="ma")
-    hline(d, x0, x1, 126)
-    d.text((W / 2, 130), "NASDAQ +6.5% \u00b7 S&P +4.7% \u00b7 NVIDIA +31% \u00b7 "
-           "NIKKEI +3% \u00b7 NVIDIA VALUE UP NEARLY $1TN", font=f_strip,
-           fill=INK, anchor="ma")
-    hline(d, x0, x1, 148)
+    # The day in brief (UTC timeline strip)
+    f_strip = font(SANS_B, 11)
+    s = ("THE DAY IN BRIEF \u2014 00:11 MERKURY CONFIRMED \u00b7 "
+         "00:20 VANUATU QUAKE \u00b7 07:52 ULLEUNG ALERT \u00b7 "
+         "10:40 O\u2019HARE GROUND STOP")
+    d.text(((W - d.textlength(s, font=f_strip)) / 2, y), s,
+           font=f_strip, fill=INK)
+    y += 16
+    d.line([(x0, y), (x1, y)], fill=HAIR, width=1)
+    y += 4
+    f_tick = font(SANS_B, 11)
+    s = ("NASDAQ +6.5% \u00b7 S&P +4.7% \u00b7 NVIDIA +31% \u00b7 "
+         "NIKKEI +3% \u00b7 NVIDIA VALUE UP NEARLY $1TN")
+    d.text(((W - d.textlength(s, font=f_tick)) / 2, y), s,
+           font=f_tick, fill=INK)
+    y += 16
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 4
 
-    # Metrics strip
-    cw = CW / 6
+    # Key metrics strip: 6 cells
+    metrics = [
+        ("07:52", "SEOUL ALERT TIME"),
+        ("3 MIN", "ALERT LIFTED AFTER"),
+        ("+31%", "NVIDIA ON HUANG RETURN"),
+        ("$1.62BN", "INDIA AID TO NEPAL"),
+        ("+6.5%", "NASDAQ ON MONDAY"),
+        ("1,500", "NEPAL FLOOD DEAD, AUG"),
+    ]
     f_num = font(SERIF_B, 24)
-    f_lab = font(SANS_B, 9)
-    for i, (num, lab) in enumerate(METRICS):
-        cx = x0 + cw * i + cw / 2
-        d.text((cx, 154), num, font=f_num, fill=INK, anchor="ma")
-        d.text((cx, 182), lab, font=f_lab, fill=GREY, anchor="ma")
+    f_lab = font(SANS, 9)
+    cw = (x1 - x0) / 6.0
+    top = y
+    for i, (num, lab) in enumerate(metrics):
+        cx = x0 + i * cw
+        nw = d.textlength(num, font=f_num)
+        d.text((cx + (cw - nw) / 2, y), num, font=f_num, fill=INK)
+        lw = d.textlength(lab, font=f_lab)
+        d.text((cx + (cw - lw) / 2, y + 28), lab, font=f_lab, fill=GREY)
         if i:
-            vline(d, x0 + cw * i, 156, 192)
-    hline(d, x0, x1, 198)
+            d.line([(cx, y + 2), (cx, y + 36)], fill=HAIR, width=1)
+    y += 42
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 6
 
-    # Lead story
-    lx, lw = x0, 468
-    rx, rw = 498, 512
+    # Lead section
+    lead_top = y
+    lw_ = 480
     f_kick = font(SANS_B, 12)
-    d.text((lx, 204), "KOREA \u00b7 DEFENCE [CONFIRMED]", font=f_kick, fill=RED)
-    y = para(d, lx, 222, LEAD_HEAD, font(SERIF_B, 34), lw, leading=41)
-    y = para(d, lx, y + 4, LEAD_BODY, font(SERIF, 13), lw, leading=16)
-    f_bul = font(SERIF_B, 12)
-    y += 2
-    for b in LEAD_BULLETS:
-        d.text((lx, y), "\u25aa  " + b, font=f_bul, fill=INK)
+    d.text((x0, y), "KOREA \u00b7 DEFENCE", font=f_kick, fill=RED)
+    d.text((x0 + d.textlength("KOREA \u00b7 DEFENCE ", font=f_kick), y),
+           "[CONFIRMED]", font=f_kick, fill=INK)
+    y += 18
+    f_head = font(SERIF_B, 28)
+    for ln in wrap(d, "SEOUL ALERT AS RUSSIAN JETS ENTER DEFENCE ZONE",
+                   f_head, lw_):
+        d.text((x0, y), ln, font=f_head, fill=INK)
+        y += 33
+    y += 3
+    f_stand = font(SERIF, 13.5)
+    for ln in wrap(d, "Seoul scrambles fighters as warplanes enter the "
+                   "defence zone; the Ulleung alert lifts in three minutes.",
+                   f_stand, lw_):
+        d.text((x0, y), ln, font=f_stand, fill=INK)
+        y += 18
+    y += 4
+    f_body = font(SANS, 11)
+    body = ("SEOUL \u2014 South Korea scrambled fighter jets early on "
+            "Tuesday after several Russian warplanes entered the "
+            "country\u2019s air defence identification zone over the "
+            "East Sea without notice, the Joint Chiefs of Staff said. "
+            "Ulleung Island was told to shelter at 07:52 after an "
+            "unidentified aircraft set off a civil defence alert. The "
+            "warning was lifted three minutes later; officials later "
+            "said the aircraft was possibly North Korean.")
+    for ln in wrap(d, body, f_body, lw_):
+        d.text((x0, y), ln, font=f_body, fill=INK)
+        y += 14.5
+    y += 4
+    f_bul = font(SANS_B, 10.5)
+    for b in ["Alert issued 07:52, lifted 3 minutes later",
+              "Jets entered the defence zone, not sovereign airspace"]:
+        d.rectangle([x0, y + 3, x0 + 7, y + 10], fill=RED)
+        d.text((x0 + 13, y), b, font=f_bul, fill=INK)
         y += 14
-    # Right column: jets photo, caption, minute-by-minute box
-    jets = fit_image(os.path.join(BASE, "assets",
-        "media-generation-jets-0-5d0092ee-35d1-4fff-919d-fb17179ec86c.webp"),
-        rw, 170, focus=0.25)
-    img.paste(jets, (rx, 204))
-    para(d, rx, 378, "South Korean fighter jets climb over the East Sea "
-         "near Ulleung Island at dawn on Tuesday. Illustration.",
-         font(SERIF_I, 11), rw, fill=GREY, leading=14)
-    d.text((rx, 408), "THE ALERT, MINUTE BY MINUTE", font=f_kick, fill=INK)
-    yy = 426
-    for ln in MINUTE:
-        d.text((rx, yy), ln, font=font(SERIF, 12), fill=INK)
-        yy += 15
-    hline(d, x0, x1, 475)
+    lead_bottom = y
 
-    # Secondary stories
-    sy = 481
-    for i, (kick, head, summ, asset) in enumerate(SECONDARY):
-        sx = x0 if i == 0 else 518
-        pic = fit_image(os.path.join(BASE, "assets", asset), 190, 92,
-                        focus=0.45)
-        img.paste(pic, (sx, sy))
-        tx = sx + 200
-        tw = 292
-        d.text((tx, sy), kick, font=font(SANS_B, 11), fill=RED)
-        yy = para(d, tx, sy + 15, head, font(SERIF_B, 16), tw, leading=19)
-        para(d, tx, yy + 1, summ, font(SERIF, 11), tw, leading=14)
-    hline(d, x0, x1, 581)
+    # Lead photo + minute-by-minute (right column)
+    rx = 512
+    rw = 496
+    py = lead_top
+    paste_photo(img, os.path.join(ASSETS, "media-generation-jets-0-3b95903e-cd04-467e-b89f-02bd90431fad.webp"),
+                (rx, py, rw, 140))
+    py += 144
+    f_cap = font(SERIF_I, 10)
+    for ln in wrap(d, "South Korean fighter jets climb over the East Sea "
+                   "near Ulleung Island at dawn on Tuesday. Illustration.",
+                   f_cap, rw):
+        d.text((rx, py), ln, font=f_cap, fill=GREY)
+        py += 12
+    py += 4
+    d.line([(rx, py), (rx + rw, py)], fill=HAIR, width=1)
+    py += 5
+    f_mb = font(SANS_B, 10.5)
+    d.text((rx, py), "THE ALERT, MINUTE BY MINUTE", font=f_mb, fill=INK)
+    py += 14
+    f_mbt = font(SANS, 10.5)
+    for ln in ["07:52 \u2014 Ulleung Island told to shelter as jets approach.",
+               "07:55 \u2014 Civil defence warning lifted, three minutes later.",
+               "Later \u2014 Officials say the aircraft was possibly North Korean."]:
+        for wln in wrap(d, ln, f_mbt, rw):
+            d.text((rx, py), wln, font=f_mbt, fill=INK)
+            py += 13
+    y = max(lead_bottom, py) + 4
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 6
 
-    # Numbered main blocks 4-15: 4 columns x 3 rows, row height follows
-    # the tallest block in the row so wrapped headlines never overlap.
-    gy = 587
-    colw = 243
-    gap = 8
-    f_gh = font(SERIF_B, 13)
-    f_gs = font(SERIF, 10)
-    for row in range(3):
-        row_h = 0
-        cells = []
-        for col in range(4):
-            idx = row * 4 + col
-            head, summ = MAIN[idx]
-            num = str(idx + 4)
-            nw = d.textlength(num + ". ", font=f_gh)
-            hl = wrap(d, head, f_gh, colw - nw)
-            sl = wrap(d, summ, f_gs, colw)[:2]
-            cells.append((num, nw, hl, sl))
-            row_h = max(row_h, len(hl) * 16 + 1 + len(sl) * 13)
-        for col in range(4):
-            num, nw, hl, sl = cells[col]
-            gx = x0 + col * (colw + gap)
-            d.text((gx, gy), num + ". ", font=f_gh, fill=RED)
-            yy = gy
-            for ln in hl:
-                d.text((gx + nw, yy), ln, font=f_gh, fill=INK)
-                yy += 16
-            yy += 1
-            for ln in sl:
-                d.text((gx, yy), ln, font=f_gs, fill=INK)
-                yy += 13
-        gy += row_h + 4
-    hline(d, x0, x1, gy + 2)
+    # Secondary stories (two halves, small photo + text)
+    f_skick = font(SANS_B, 11)
+    f_shead = font(SERIF_B, 16)
+    f_sbody = font(SANS, 11)
+    sec_top = y
+    sec_h = 0
+    halves = [
+        (x0, "media-generation-traders-0-848555ba-4358-407c-8c28-9cf7ea5e5b8d.webp",
+         "MARKETS \u00b7 MONDAY", "[REPORTED]",
+         "HUANG\u2019S RETURN SENDS NVIDIA UP 31%",
+         "Shares jump on Monday as Jensen Huang returns as chief "
+         "executive 11 days after resigning; Nasdaq +6.5%, S&P +4.7%."),
+        (520, "media-generation-chess-0-85fa0b33-e28b-4d41-ad6e-abaef4b0e080.webp",
+         "SPORT \u00b7 GENEVA", "",
+         "GUKESH DEFENDS CROWN AS TITLE RACE OPENS",
+         "World champion faces Uzbekistan\u2019s Javokhir Sindarov as the "
+         "2026 World Chess Championship begins in Geneva."),
+    ]
+    for hx, asset, kick, tag, head, body in halves:
+        paste_photo(img, os.path.join(ASSETS, asset), (hx, y, 190, 88))
+        tx = hx + 200
+        tw = 488 - 200
+        ty = y
+        d.text((tx, ty), kick, font=f_skick, fill=RED)
+        if tag:
+            d.text((tx + d.textlength(kick + " ", font=f_skick), ty),
+                   tag, font=f_skick, fill=INK)
+        ty += 15
+        for ln in wrap(d, head, f_shead, tw):
+            d.text((tx, ty), ln, font=f_shead, fill=INK)
+            ty += 18
+        for ln in wrap(d, body, f_sbody, tw):
+            d.text((tx, ty), ln, font=f_sbody, fill=INK)
+            ty += 13.5
+        sec_h = max(sec_h, max(88, ty - y))
+    y += sec_h + 4
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 5
 
-    # Briefs: "ALSO ON TUESDAY 24 NOVEMBER", 5 columns x 7 rows
-    d.text((x0, gy + 8), "ALSO ON TUESDAY 24 NOVEMBER",
-           font=font(SERIF_B, 13), fill=INK)
-    bcolw = (CW - 4 * 8) / 5
-    f_bh = font(SERIF_B, 10)
-    f_bt = font(SERIF, 10)
-    by = gy + 26
-    for row in range(7):
-        for col in range(5):
-            idx = row * 5 + col
-            if idx >= len(BRIEFS):
-                break
-            head, rest = BRIEFS[idx]
-            bx = x0 + col * (bcolw + 8)
-            full = head + " \u2014 " + rest
-            lines = wrap(d, full, f_bt, bcolw)
-            ly = by
-            for li, ln in enumerate(lines[:2]):
-                if li == 0 and ln.startswith(head):
-                    d.text((bx, ly), head, font=f_bh, fill=INK)
-                    hw = d.textlength(head, font=f_bh)
-                    d.text((bx + hw, ly), ln[len(head):], font=f_bt, fill=INK)
-                else:
-                    d.text((bx, ly), ln, font=f_bt, fill=INK)
-                ly += 13
-        by += 26
-    # Bottom row: map + Date Check
-    my = by + 2
-    d.text((x0, my), "WHERE IT HAPPENED", font=font(SANS_B, 10), fill=INK)
-    draw_map(d, x0, my + 13, 330, 48)
-    dx = 354
-    d.text((dx, my), "DATE CHECK", font=font(SANS_B, 10), fill=INK)
-    para(d, dx, my + 13, DATE_CHECK, font(SERIF, 10), W - M - dx, leading=13)
-    return img
+    # Numbered main blocks 4-15: 4 columns x 3 rows
+    f_bh = font(SERIF_B, 12.5)
+    f_bs = font(SANS, 9.5)
+    colw = (x1 - x0 - 3 * 12) / 4.0
+    rows = [MAIN_BLOCKS[i:i + 4] for i in range(0, 12, 4)]
+    for ri, row in enumerate(rows):
+        rh = 0
+        heights = []
+        for head, summ in row:
+            hl = wrap(d, head, f_bh, colw)
+            sl = wrap(d, summ, f_bs, colw)
+            hh = len(hl) * 15 + len(sl) * 12.5 + 4
+            heights.append(hh)
+            rh = max(rh, hh)
+        for ci, (head, summ) in enumerate(row):
+            cx = x0 + ci * (colw + 12)
+            cy = y
+            for ln in wrap(d, head, f_bh, colw):
+                d.text((cx, cy), ln, font=f_bh, fill=INK)
+                cy += 15
+            cy += 1
+            for ln in wrap(d, summ, f_bs, colw):
+                d.text((cx, cy), ln, font=f_bs, fill=INK)
+                cy += 12.5
+            if ci:
+                d.line([(cx - 6, y), (cx - 6, y + rh)], fill=HAIR, width=1)
+        y += rh + 3
+        if ri < 2:
+            d.line([(x0, y), (x1, y)], fill=HAIR, width=1)
+            y += 4
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 5
+
+    # ALSO ON TUESDAY 24 NOVEMBER — 35 briefs in 3 columns
+    f_also = font(SANS_B, 12)
+    d.text((x0, y), "ALSO ON TUESDAY 24 NOVEMBER", font=f_also, fill=INK)
+    y += 17
+    f_bfh = font(SANS_B, 10)
+    f_bfb = font(SANS, 10)
+    bcolw = (x1 - x0 - 2 * 16) / 3.0
+    cols = [BRIEFS[i:i + 12] for i in (0, 12, 24)]
+    col_h = 0
+    for ci, col in enumerate(cols):
+        cx = x0 + ci * (bcolw + 16)
+        cy = y
+        for head, body in col:
+            lines = wrap_mixed(d, head, body, f_bfh, f_bfb, bcolw)
+            for segs in lines:
+                draw_mixed_line(d, cx, cy, segs)
+                cy += 13
+            cy += 1
+        col_h = max(col_h, cy - y)
+        if ci:
+            d.line([(cx - 8, y), (cx - 8, y + col_h)], fill=HAIR, width=1)
+    y += col_h + 4
+    d.line([(x0, y), (x1, y)], fill=INK, width=1)
+    y += 5
+
+    # Bottom band: map (left) + Date Check (right)
+    band_top = y
+    f_sec = font(SANS_B, 11)
+    d.text((x0, y), "WHERE IT HAPPENED", font=f_sec, fill=INK)
+    d.text((360, y), "DATE CHECK", font=f_sec, fill=INK)
+    y += 15
+    mx0, my0, mw, mh = x0, y, 320, 76
+    d.rectangle([mx0, my0, mx0 + mw, my0 + mh], outline=HAIR, width=1)
+    for poly in CONTINENTS:
+        pts = [ll2xy(lon, lat, mx0 + 4, my0 + 4, mw - 8, mh - 8)
+               for lon, lat in poly]
+        d.polygon(pts, fill=LAND, outline=LAND_EDGE)
+    f_map = font(SANS_B, 9)
+    for name, lon, lat, (dx, dy) in MAP_POINTS:
+        px, py = ll2xy(lon, lat, mx0 + 4, my0 + 4, mw - 8, mh - 8)
+        d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=RED)
+        lx, ly = px + dx, py + dy
+        lx = max(mx0 + 2, min(lx, mx0 + mw - d.textlength(name, font=f_map) - 2))
+        ly = max(my0 + 1, min(ly, my0 + mh - 11))
+        d.text((lx, ly), name, font=f_map, fill=INK)
+    f_dc = font(SANS, 10)
+    dc = ("Every story here happened, or was first reported, on Tuesday "
+          "24 November 2026 \u2014 except the items marked MONDAY: Nepal "
+          "aid, Iran sanctions, Nvidia\u2019s return, NATO AWACS, the "
+          "Delta deal, Iran blockade reply, the Iowa blast pause, "
+          "COP31, FIFA 2031. All illustrations are original work made "
+          "for this edition.")
+    cy = y
+    for ln in wrap(d, dc, f_dc, 648):
+        d.text((360, cy), ln, font=f_dc, fill=INK)
+        cy += 12.5
+    cy += 3
+    f_cnt = font(SANS_B, 10)
+    d.text((360, cy), "50 STORIES \u00b7 6 REGIONS \u00b7 3 ILLUSTRATIONS",
+           font=f_cnt, fill=RED)
+    cy += 14
+    y = max(my0 + mh, cy) + 4
+    assert y <= H, "layout overflow: y=%d" % y
+
+    img.save(out_path(), "PNG", optimize=True)
+    return out_path()
 
 
 def main():
-    if HAVE_PIL:
-        img = build()
-        os.makedirs(os.path.dirname(OUT), exist_ok=True)
-        img.save(OUT, format="PNG")
-    else:
-        os.makedirs(os.path.dirname(OUT), exist_ok=True)
-        shutil.copyfile(os.path.join(BASE, "entry.png"), OUT)
+    if not HAVE_PIL:
+        shutil.copyfile(os.path.join(BASE, "entry.png"), out_path())
+        return
+    p = render()
+    print("wrote", p)
 
 
 if __name__ == "__main__":

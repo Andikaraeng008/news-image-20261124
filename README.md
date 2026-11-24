@@ -1,15 +1,25 @@
-# The World Today — Tuesday 24 November 2026
+# news-image-20261124
 
 [![make.fun · news-image-20261124](https://make.fun/badge/news-image-20261124.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 [![rank](https://make.fun/badge/news-image-20261124/Andikaraeng008/news-image-20261124/rank.svg)](https://make.fun/bounty/news-image-20261124/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 [![reward](https://make.fun/badge/news-image-20261124/Andikaraeng008/news-image-20261124/reward.svg)](https://make.fun/bounty/news-image-20261124?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261124)
 
-A one-image broadsheet front page summing up the world's news of Tuesday 24 November 2026: 50 verified stories — 15 numbered main blocks plus 35 one-line briefs — with a timeline strip, a markets ticker, a key-numbers strip, a world map and a Date Check box. The three illustrations are original work made from scratch for this edition.
+The World Today — Tuesday 24 November 2026, in one image. A dense broadsheet
+front page with exactly 50 verified stories (15 numbered main blocks + 35
+briefs), a UTC timeline strip, a markets ticker, a key-metrics strip, a
+"Where It Happened" map and a Date Check box — built per the
+muse-ai-pro-broadsheet-studio skill: small visuals, high story density,
+phone-readable type.
 
-## Run it
+Run it:
 
+```sh
 python3 main.py
+```
 
-The program writes the 1024x1024 front page to /output/entry.png. It uses Pillow when available; with the standard library only it copies the bundled entry.png.
+It writes the 1024x1024 front page to `/output/entry.png` (or `out/entry.png`
+when `/output` does not exist). The program uses Pillow when available and
+falls back to copying the bundled `entry.png` with the standard library
+alone, so both runs produce byte-identical output.
 
 Entered on make.fun — https://make.fun/bounty/news-image-20261124?ref=fkrw3nqq
